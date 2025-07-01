@@ -41,7 +41,6 @@ async function connectDB() {
   mediaCollection = db.collection('media');
   console.log('Connected to MongoDB');
 }
-
 connectDB().catch(console.error);
 
 // Multer storage config
@@ -54,7 +53,6 @@ const storage = multer.diskStorage({
     cb(null, uniqueName + path.extname(file.originalname));
   },
 });
-
 const upload = multer({ storage });
 
 // Routes
@@ -75,7 +73,7 @@ app.post('/media', upload.single('media'), async (req, res) => {
     const mediaDoc = {
       title: title || req.file.originalname,
       type,
-      url: `/uploads/${req.file.filename}`, // relative url for frontend
+      url: `/uploads/${req.file.filename}`,
       isPrivate: isPrivate === 'true',
       createdAt: new Date(),
     };
@@ -95,6 +93,66 @@ app.get('/media', async (req, res) => {
     res.json(mediaList);
   } catch (err) {
     res.status(500).send('Failed to fetch media');
+  }
+});
+
+// Get all media (public + private)
+app.get('/my-uploads', async (req, res) => {
+  try {
+    const mediaList = await mediaCollection.find().toArray();
+    res.json(mediaList);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Failed to fetch all uploads');
+  }
+});
+
+// Delete media by id
+app.delete('/media/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { ObjectId } = require('mongodb');
+    const media = await mediaCollection.findOne({ _id: new ObjectId(id) });
+    if (!media) return res.status(404).send('Media not found');
+
+    // Delete file from disk
+    const filePath = path.join(uploadDir, path.basename(media.url));
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    // Delete from DB
+    await mediaCollection.deleteOne({ _id: new ObjectId(id) });
+    res.sendStatus(200);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Failed to delete media');
+  }
+});
+
+// Update media (edit metadata + toggle privacy)
+app.patch('/media/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, type, isPrivate } = req.body;
+    const { ObjectId } = require('mongodb');
+
+    const updateFields = {};
+    if (title !== undefined) updateFields.title = title;
+    if (type !== undefined) updateFields.type = type;
+    if (isPrivate !== undefined) updateFields.isPrivate = isPrivate;
+
+    const result = await mediaCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateFields }
+    );
+
+    if (result.matchedCount === 0) return res.status(404).send('Media not found');
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Failed to update media');
   }
 });
 
